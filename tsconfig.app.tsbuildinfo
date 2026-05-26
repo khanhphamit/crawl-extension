@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/manifest.ts","./src/background/index.ts","./src/config/default-config.ts","./src/content/scraper.ts","./src/options/app.tsx","./src/options/main.tsx","./src/popup/app.tsx","./src/types/global.d.ts","./src/utils/api-helper.ts","./src/utils/csv.ts","./src/utils/dom-helper.ts","./src/utils/parser.ts","./src/utils/sleep.ts"],"version":"6.0.3"}
