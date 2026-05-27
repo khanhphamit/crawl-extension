@@ -27,6 +27,8 @@ function App() {
     ngayCapNhatSelector: CrawlConfig.detailPageSelectors.ngayCapNhatSelector,
     tinhTrangSelector: CrawlConfig.detailPageSelectors.tinhTrangSelector,
     contentSelector: CrawlConfig.detailPageSelectors.contentSelector,
+    luocDoButtonSelector: CrawlConfig.detailPageSelectors.luocDoButtonSelector,
+    luocDoContentSelector: CrawlConfig.detailPageSelectors.luocDoContentSelector,
 
     // Batch
     batchSize: CrawlConfig.batch.batchSize,
@@ -76,6 +78,8 @@ function App() {
       ngayCapNhatSelector: CrawlConfig.detailPageSelectors.ngayCapNhatSelector,
       tinhTrangSelector: CrawlConfig.detailPageSelectors.tinhTrangSelector,
       contentSelector: CrawlConfig.detailPageSelectors.contentSelector,
+      luocDoButtonSelector: CrawlConfig.detailPageSelectors.luocDoButtonSelector,
+      luocDoContentSelector: CrawlConfig.detailPageSelectors.luocDoContentSelector,
       batchSize: CrawlConfig.batch.batchSize,
       delayMultiplier: CrawlConfig.delay.delayMultiplier,
     });
@@ -223,6 +227,16 @@ function App() {
           key: "contentSelector",
           label: "Content Selector",
           hint: "CSS selector cho nội dung văn bản (thường là .content hoặc main)",
+        },
+        {
+          key: "luocDoButtonSelector",
+          label: "Lược đồ Button Selector",
+          hint: "CSS selector cho button/anchor Lược đồ (vd: #aLuocDo)",
+        },
+        {
+          key: "luocDoContentSelector",
+          label: "Lược đồ Content Selector",
+          hint: "CSS selector cho vùng chứa nội dung lược đồ (vd: #tab4)",
         },
       ])}
 

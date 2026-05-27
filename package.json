@@ -7,12 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "playwright-scrape": "node scripts/playwright-scraper.js"
   },
   "dependencies": {
     "@crxjs/vite-plugin": "^2.4.0",
     "file-saver": "^2.0.5",
     "papaparse": "^5.5.3",
+    "playwright": "^1.47.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

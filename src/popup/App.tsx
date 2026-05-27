@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { CrawlConfig } from "../config/default-config";
 
+type SettingsMap = Record<string, string>;
+
 interface SessionState {
   isRunning: boolean;
   isPaused: boolean;
@@ -11,7 +13,7 @@ interface SessionState {
 }
 
 // Helper function to build config from saved settings
-function buildConfigFromSettings(settings: Record<string, any>) {
+function buildConfigFromSettings(settings: SettingsMap) {
   return {
     url: {
       baseUrl: settings.baseUrl || CrawlConfig.url.baseUrl,
@@ -42,6 +44,8 @@ function buildConfigFromSettings(settings: Record<string, any>) {
       ngayCapNhatSelector: settings.ngayCapNhatSelector || CrawlConfig.detailPageSelectors.ngayCapNhatSelector,
       tinhTrangSelector: settings.tinhTrangSelector || CrawlConfig.detailPageSelectors.tinhTrangSelector,
       contentSelector: settings.contentSelector || CrawlConfig.detailPageSelectors.contentSelector,
+      luocDoButtonSelector: settings.luocDoButtonSelector || CrawlConfig.detailPageSelectors.luocDoButtonSelector,
+      luocDoContentSelector: settings.luocDoContentSelector || CrawlConfig.detailPageSelectors.luocDoContentSelector,
     },
     batch: {
       batchSize: parseInt(settings.batchSize) || CrawlConfig.batch.batchSize,
@@ -144,7 +148,7 @@ function App() {
 
     // Load saved settings and build config
     chrome.storage.local.get("crawlerSettings", (result) => {
-      const settings = result.crawlerSettings || {};
+      const settings = (result.crawlerSettings || {}) as Record<string, string>;
       const config = buildConfigFromSettings(settings);
       chrome.runtime.sendMessage({ type: "START", config });
     });

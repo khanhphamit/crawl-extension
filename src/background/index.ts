@@ -13,6 +13,18 @@ type DetailData = {
   tinh_trang_hieu_luc: string;
   content: string;
   source_url: string;
+  luoc_do_html: string;
+  luoc_do_links: string[];
+  vanbanBiBaiBo: string[];
+  vanbanBaiBo: string[];
+  vanbanSuaDoi: string[];
+  vanbanBiSuaDoi: string[];
+  vanbanDuocHuongDan: string[];
+  vanbanHuongDan: string[];
+  vanbanBiDinhChinh: string[];
+  vanbanDinhChinh: string[];
+  vanbanDuocHopNhat: string[];
+  vanbanHopNhat: string[];
 };
 
 type LinkItem = {
@@ -350,6 +362,18 @@ async function startCrawl(crawlConfig: typeof CrawlConfig) {
             tinh_trang_hieu_luc: detail.tinh_trang_hieu_luc,
             content: detail.content,
             source_url: detail.source_url,
+            luoc_do_html: detail.luoc_do_html,
+            luoc_do_links: detail.luoc_do_links,
+            vanbanBiBaiBo: detail.vanbanBiBaiBo,
+            vanbanBaiBo: detail.vanbanBaiBo,
+            vanbanSuaDoi: detail.vanbanSuaDoi,
+            vanbanBiSuaDoi: detail.vanbanBiSuaDoi,
+            vanbanDuocHuongDan: detail.vanbanDuocHuongDan,
+            vanbanHuongDan: detail.vanbanHuongDan,
+            vanbanBiDinhChinh: detail.vanbanBiDinhChinh,
+            vanbanDinhChinh: detail.vanbanDinhChinh,
+            vanbanDuocHopNhat: detail.vanbanDuocHopNhat,
+            vanbanHopNhat: detail.vanbanHopNhat,
           };
 
           detailBatch.push(crawlItem);

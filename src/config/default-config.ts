@@ -37,6 +37,8 @@ export const CrawlConfig = {
     ngayCapNhatSelector: "#divThuocTinh table tr:nth-child(4) td:nth-child(2)",
     tinhTrangSelector: "#divThuocTinh table tr:nth-child(5) td:nth-child(3)",
     contentSelector: ".content1",
+    luocDoButtonSelector: "#aLuocDo",
+    luocDoContentSelector: "#tab4",
   },
 
   // Cấu hình batch API

@@ -12,6 +12,18 @@ export interface CrawlItem {
   tinh_trang_hieu_luc: string;
   content: string;
   source_url: string;
+  luoc_do_html?: string;
+  luoc_do_links?: string[];
+  vanbanBiBaiBo?: string[];
+  vanbanBaiBo?: string[];
+  vanbanSuaDoi?: string[];
+  vanbanBiSuaDoi?: string[];
+  vanbanDuocHuongDan?: string[];
+  vanbanHuongDan?: string[];
+  vanbanBiDinhChinh?: string[];
+  vanbanDinhChinh?: string[];
+  vanbanDuocHopNhat?: string[];
+  vanbanHopNhat?: string[];
 }
 
 export async function saveCrawlDataToApi(
