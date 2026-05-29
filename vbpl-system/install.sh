@@ -61,7 +61,7 @@ echo "======================================="
 
 echo ""
 echo "Open:"
-echo "http://localhost:8000"
+echo "http://localhost:8909/admin"
 
 echo ""
 echo "Create admin user:"
