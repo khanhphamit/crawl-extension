@@ -9,7 +9,7 @@ const manifest: ManifestV3Export = {
 
   permissions: ["storage", "tabs", "downloads", "scripting"],
 
-  host_permissions: ["https://thuvienphapluat.vn/*"],
+  host_permissions: ["https://thuvienphapluat.vn/*", "http://localhost:8909/*", "http://127.0.0.1:8909/*"],
 
   action: {
     default_popup: "index.html",

@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vbpl_app
+    restart: unless-stopped
+    working_dir: /var/www
+
+    volumes:
+      - ./backend:/var/www
+
+    depends_on:
+      - postgres
+      - redis
+
+    networks:
+      - vbpl_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: vbpl_nginx
+    restart: unless-stopped
+
+    ports:
+      - "8909:80"
+
+    volumes:
+      - ./backend:/var/www
+      - ./docker/nginx:/etc/nginx/conf.d
+
+    depends_on:
+      - app
+
+    networks:
+      - vbpl_network
+
+  postgres:
+    image: postgres:16
+    container_name: vbpl_postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: vbpl
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - vbpl_postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - vbpl_network
+
+  redis:
+    image: redis:alpine
+    container_name: vbpl_redis
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
+    networks:
+      - vbpl_network
+
+  queue:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: vbpl_queue
+    restart: unless-stopped
+
+    working_dir: /var/www
+
+    command: php artisan queue:work
+
+    volumes:
+      - ./backend:/var/www
+
+    depends_on:
+      - app
+      - redis
+      - postgres
+
+    networks:
+      - vbpl_network
+
+networks:
+  vbpl_network:
+
+volumes:
+  vbpl_postgres_data:

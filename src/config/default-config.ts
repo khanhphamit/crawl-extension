@@ -4,7 +4,7 @@ export const CrawlConfig = {
   // Cấu hình URL
   url: {
     baseUrl: "https://thuvienphapluat.vn/page/tim-van-ban.aspx?keyword=&area=0&type=0&status=0&lan=1&org=0&signer=0&match=True&sort=1&bdate=16/03/2025&edate=02/07/2025&page=",
-    apiEndpoint: "https://caselaw.vn/api/crawler/save",
+    apiEndpoint: "http://localhost:8909/api/crawl",
   },
 
   // Cấu hình pagination

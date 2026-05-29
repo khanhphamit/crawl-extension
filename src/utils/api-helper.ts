@@ -32,14 +32,16 @@ export async function saveCrawlDataToApi(
   timeout: number = 30000
 ): Promise<{ success: boolean; message?: string }> {
   try {
+    const normalizedEndpoint = apiEndpoint.replace(/\/api(\/api)+/g, "/api");
+
     console.log(
-      `[API] Gửi ${items.length} records tới API: ${apiEndpoint}`
+      `[API] Gửi ${items.length} records tới API: ${normalizedEndpoint}`
     );
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const response = await fetch(apiEndpoint, {
+    const response = await fetch(normalizedEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
