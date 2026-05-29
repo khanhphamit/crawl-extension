@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'vbpl_id',
+    'law_id',
     'luoc_do_html',
     'luoc_do_links',
     'vanban_bi_bai_bo',
@@ -45,6 +45,6 @@ class LuocDo extends Model
 
     public function vbpl(): BelongsTo
     {
-        return $this->belongsTo(Vbpl::class);
+        return $this->belongsTo(Vbpl::class, 'law_id', 'law_id');
     }
 }

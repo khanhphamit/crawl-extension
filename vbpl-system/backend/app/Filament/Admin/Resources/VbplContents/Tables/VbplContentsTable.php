@@ -14,7 +14,8 @@ class VbplContentsTable
     {
         return $table
             ->columns([
-                TextColumn::make('vbpl.id')
+                TextColumn::make('vbpl.law_id')
+                    ->label('Law ID')
                     ->searchable(),
                 TextColumn::make('content')
                     ->label('Content preview')

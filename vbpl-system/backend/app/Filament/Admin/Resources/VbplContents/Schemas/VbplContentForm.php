@@ -12,8 +12,8 @@ class VbplContentForm
     {
         return $schema
             ->components([
-                Select::make('vbpl_id')
-                    ->relationship('vbpl', 'id')
+                Select::make('law_id')
+                    ->relationship('vbpl', 'law_id')
                     ->required(),
                 RichEditor::make('content')
                     ->columnSpanFull()

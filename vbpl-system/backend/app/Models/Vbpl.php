@@ -35,11 +35,11 @@ class Vbpl extends Model
 
     public function contents(): HasMany
     {
-        return $this->hasMany(VbplContent::class);
+        return $this->hasMany(VbplContent::class, 'law_id', 'law_id');
     }
 
     public function luocDo(): HasOne
     {
-        return $this->hasOne(LuocDo::class);
+        return $this->hasOne(LuocDo::class, 'law_id', 'law_id');
     }
 }

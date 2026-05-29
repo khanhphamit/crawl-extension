@@ -14,7 +14,8 @@ class LuocDosTable
     {
         return $table
             ->columns([
-                TextColumn::make('vbpl.id')
+                TextColumn::make('vbpl.law_id')
+                    ->label('Law ID')
                     ->searchable(),
                 TextColumn::make('vanban_bi_bai_bo')
                     ->searchable()

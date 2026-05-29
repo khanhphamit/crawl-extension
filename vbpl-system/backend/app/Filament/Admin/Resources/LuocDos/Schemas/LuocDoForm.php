@@ -13,8 +13,8 @@ class LuocDoForm
     {
         return $schema
             ->components([
-                Select::make('vbpl_id')
-                    ->relationship('vbpl', 'id')
+                Select::make('law_id')
+                    ->relationship('vbpl', 'law_id')
                     ->required(),
                 // RichEditor::make('luoc_do_html')
                 //     ->columnSpanFull()
