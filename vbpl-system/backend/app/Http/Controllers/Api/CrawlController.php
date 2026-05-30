@@ -87,8 +87,12 @@ class CrawlController extends Controller
                     'source_url' => $item['source_url'] ?? null,
                 ]);
 
-                if (!empty($item['content'])) {
-                    $vbpl->contents()->create(['content' => $item['content']]);
+                if (!empty($item['content']) && !empty($item['law_id'])) {
+                    $dir = base_path('data');
+                    if (!is_dir($dir)) {
+                        mkdir($dir, 0755, true);
+                    }
+                    file_put_contents($dir . DIRECTORY_SEPARATOR . $item['law_id'] . '.txt', $item['content']);
                 }
 
                 $vbpl->luocDo()->create([
