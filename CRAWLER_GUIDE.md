@@ -10,6 +10,7 @@ The TVPL Crawler is a Chrome extension that automatically extracts legal documen
 - **Configurable selectors**: Adapt to website structure changes without code modifications
 - **Smart page loading**: Detects when pages are fully loaded before extraction
 - **Session state**: Tracks progress with timestamps and logging
+- **Chống phát hiện bot / Google captcha**: xem [docs/ANTI_DETECTION.md](docs/ANTI_DETECTION.md) (Cloudflare, throttle hạ nhiệt, 2 bẫy detect captcha, cách verify runtime)
 
 ---
 
