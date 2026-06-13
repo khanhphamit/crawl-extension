@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { CrawlConfig } from "../config/default-config";
+import {
+  generateConfigHash,
+  getResumableSession,
+  clearCrawlSession,
+  type CrawlSessionData,
+} from "../utils/crawl-persistence";
 
 type SettingsMap = Record<string, string>;
 
@@ -57,14 +63,15 @@ function buildConfigFromSettings(settings: SettingsMap) {
       minDelay: CrawlConfig.delay.minDelay,
       maxDelay: CrawlConfig.delay.maxDelay,
       pageLoadTimeout: CrawlConfig.delay.pageLoadTimeout,
+      captchaWaitTime: (parseFloat(settings.captchaWaitTime) || CrawlConfig.delay.captchaWaitTime / 1000) * 1000,
     },
     logging: CrawlConfig.logging,
   };
 }
 
 function App() {
-  const [folder, setFolder] = useState<FileSystemDirectoryHandle>();
   const [statusText, setStatusText] = useState("Chưa bắt đầu");
+  const [savedSession, setSavedSession] = useState<CrawlSessionData | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>({
     isRunning: false,
     isPaused: false,
@@ -75,14 +82,8 @@ function App() {
   });
 
   useEffect(() => {
-    const handleMessage = async (
-      msg: { type: string;
-         statusText?: string;
-        isRunning?: boolean;
-        isPaused?: boolean; 
-        currentPage?: number; totalPages?: number; collectedLinks?: number; savedRecords?: number, filename?: string; content?: string },
-      sender: chrome.runtime.MessageSender,
-      sendResponse: (response?: { success: boolean; error?: string }) => void
+    const handleMessage = (
+      msg: { type: string; statusText?: string; isRunning?: boolean; isPaused?: boolean; currentPage?: number; totalPages?: number; collectedLinks?: number; savedRecords?: number }
     ) => {
       if (msg.type === "STATUS") {
         setStatusText(msg.statusText || "");
@@ -95,63 +96,60 @@ function App() {
           savedRecords: msg.savedRecords ?? 0,
         });
       }
-
-      if (msg.type === "SAVE_FILE") {
-        try {
-          if (!folder) {
-            sendResponse({ success: false, error: "No folder selected" });
-            return;
-          }
-
-          const handle = await folder.getFileHandle(msg.filename!, {
-            create: true,
-          });
-
-          const writable = await handle.createWritable();
-          await writable.write(msg.content!);
-          await writable.close();
-
-          sendResponse({ success: true });
-        } catch (error) {
-          const err = error as Error;
-          sendResponse({ success: false, error: err.message });
-        }
-      }
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
-    return () => chrome.runtime.onMessage.removeListener(handleMessage);
-  }, [folder]);
 
-  async function chooseFolder() {
-    try {
-      const dir = await window.showDirectoryPicker();
-      setFolder(dir);
-      chrome.runtime.sendMessage({ type: "FOLDER_SELECTED" });
-    } catch (error) {
-      const err = error as Error;
-      if (err.name !== "AbortError") {
-        console.error("Error selecting folder:", error);
+    // Lấy state hiện tại từ background khi popup mở lại
+    chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
+      if (res && res.type === "STATUS") {
+        handleMessage(res);
       }
-    }
-  }
+    });
+
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, []);
+
+  // Check for saved session on mount
+  useEffect(() => {
+    (async () => {
+      const currentConfig = buildConfigFromSettings({} as any);
+      const configHash = generateConfigHash(currentConfig);
+      const session = await getResumableSession(configHash);
+      if (session) {
+        setSavedSession(session);
+        const timeAgo = Math.round((Date.now() - session.timestamp) / 1000 / 60); // minutes
+        setStatusText(`💾 Tìm thấy session lưu từ ${timeAgo} phút trước (trang ${session.currentPage})`);
+      }
+    })();
+  }, []);
 
   function openSettings() {
     chrome.runtime.openOptionsPage();
   }
 
   function start() {
-    if (!folder) {
-      alert("Vui lòng chọn thư mục trước");
-      return;
-    }
-
-    // Load saved settings and build config
     chrome.storage.local.get("crawlerSettings", (result) => {
       const settings = (result.crawlerSettings || {}) as Record<string, string>;
       const config = buildConfigFromSettings(settings);
-      chrome.runtime.sendMessage({ type: "START", config });
+      chrome.runtime.sendMessage({ type: "START", config, resumeFromSaved: true });
+      setSavedSession(null);
     });
+  }
+
+  async function resumeSavedSession() {
+    chrome.storage.local.get("crawlerSettings", (result) => {
+      const settings = (result.crawlerSettings || {}) as Record<string, string>;
+      const config = buildConfigFromSettings(settings);
+      chrome.runtime.sendMessage({ type: "START", config, resumeFromSaved: true });
+      setSavedSession(null);
+    });
+  }
+
+  async function discardSavedSession() {
+    await clearCrawlSession();
+    setSavedSession(null);
+    setStatusText("Đã xóa session lưu. Bắt đầu lại từ trang đầu.");
   }
 
   function stop() {
@@ -249,11 +247,68 @@ function App() {
         </div>
       </div>
 
+      {/* Saved Session Alert */}
+      {savedSession && (
+        <div style={{
+          padding: 12,
+          marginBottom: 12,
+          backgroundColor: "#FFF3E0",
+          borderLeft: "4px solid #FF9800",
+          borderRadius: 4,
+          fontSize: 13,
+        }}>
+          <div style={{ marginBottom: 8, fontWeight: "bold" }}>
+            💾 Tìm thấy session lưu
+          </div>
+          <div style={{ marginBottom: 8, fontSize: 12 }}>
+            Trang: {savedSession.currentPage} / {savedSession.totalPages}
+            <br />
+            Links: {savedSession.collectedLinks}
+            <br />
+            Lưu: {savedSession.savedRecords} records
+            <br />
+            Trạng thái: {savedSession.status === "error" ? "❌ Lỗi" : "⏹️ Dừng"}
+            {savedSession.errorMessage && ` - ${savedSession.errorMessage}`}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <button
+              onClick={resumeSavedSession}
+              style={{
+                padding: 8,
+                backgroundColor: "#4CAF50",
+                color: "white",
+                border: "none",
+                borderRadius: 3,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: "bold",
+              }}
+            >
+              ↩️ Tiếp tục
+            </button>
+            <button
+              onClick={discardSavedSession}
+              style={{
+                padding: 8,
+                backgroundColor: "#f44336",
+                color: "white",
+                border: "none",
+                borderRadius: 3,
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              🗑️ Xóa
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
         <button
           onClick={start}
-          disabled={!folder || sessionState.isRunning}
+          disabled={sessionState.isRunning}
           style={{
             padding: 10,
             backgroundColor: "#4CAF50",
@@ -262,7 +317,7 @@ function App() {
             borderRadius: 4,
             cursor: "pointer",
             fontWeight: "bold",
-            opacity: (!folder || sessionState.isRunning) ? 0.6 : 1,
+            opacity: sessionState.isRunning ? 0.6 : 1,
           }}
         >
           ▶️ Bắt đầu
@@ -320,27 +375,13 @@ function App() {
         </button>
       </div>
 
-      {/* Folder and Settings */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <button
-          onClick={chooseFolder}
-          style={{
-            padding: 10,
-            backgroundColor: "#2196F3",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          {folder ? "📁 Thay thư mục" : "📁 Chọn thư mục"}
-        </button>
-
+      {/* Settings */}
+      <div>
         <button
           onClick={openSettings}
           style={{
             padding: 10,
+            width: "100%",
             backgroundColor: "#666",
             color: "white",
             border: "none",

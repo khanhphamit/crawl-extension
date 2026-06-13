@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "node --test --experimental-strip-types \"tests/**/*.test.ts\"",
     "playwright-scrape": "node scripts/playwright-scraper.js"
   },
   "dependencies": {

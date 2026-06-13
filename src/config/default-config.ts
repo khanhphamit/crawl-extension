@@ -43,17 +43,18 @@ export const CrawlConfig = {
 
   // Cấu hình batch API
   batch: {
-    batchSize: 10, // Sau bao nhiêu records thì gọi API (mặc định 1 để test)
+    batchSize: 5, // Gửi API sớm hơn → mất ít dữ liệu nếu bị chặn giữa chừng
     apiMethod: "POST",
     apiTimeout: 30000, // 30 seconds
   },
 
   // Cấu hình delay
   delay: {
-    delayMultiplier: 1, // Hệ số tốc độ (1 = bình thường, 2 = chậm gấp 2)
+    delayMultiplier: 1.5, // Hệ số tốc độ (1 = bình thường) - giãn nhịp để giống người dùng hơn
     minDelay: 500, // ms
     maxDelay: 2000, // ms
     pageLoadTimeout: 30000, // ms - thời gian chờ page load
+    captchaWaitTime: 90000, // ms - cơ sở cho cooldown khi bị chặn (sẽ nhân lũy thừa nếu lặp lại)
   },
 
   // Cấu hình logging

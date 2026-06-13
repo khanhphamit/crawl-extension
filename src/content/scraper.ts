@@ -1,6 +1,7 @@
 import { extractText, extractHtml, waitForPageLoad } from "../utils/dom-helper";
 import { sleep } from "../utils/sleep";
 import { CrawlConfig } from "../config/default-config";
+import { isCaptchaByText } from "../utils/anti-detection";
 
 export type LinkItem = {
   link: string;
@@ -41,13 +42,41 @@ export type CollectResponse = {
   data: LinkItem[];
 };
 
+// reCAPTCHA "I'm not a robot" checkbox (anchor) HIỂN THỊ = đang thực sự thử thách.
+// CỰC QUAN TRỌNG: thuvienphapluat.vn nhúng sẵn reCAPTCHA vô hình (cho login) trên
+// MỌI trang — ở trạng thái nghỉ anchor là 0x0/ẩn, .g-recaptcha và [data-sitekey]
+// cũng 0x0/ẩn. Nếu coi sự HIỆN DIỆN của widget là captcha thì sẽ báo nhầm mọi
+// trang tải tốt → extension cooldown vô tận. Chỉ tính khi challenge thật sự bày ra.
+function isVisible(el: Element | null): el is HTMLElement {
+  const h = el as HTMLElement | null;
+  return !!h && h.offsetParent !== null && h.offsetWidth > 50 && h.offsetHeight > 50;
+}
+
+function hasVisibleChallengeWidget(): boolean {
+  // Checkbox reCAPTCHA đang hiện
+  if (isVisible(document.querySelector('iframe[src*="recaptcha/api2/anchor"]'))) return true;
+  // Cloudflare Turnstile đang hiện
+  if (isVisible(document.querySelector('iframe[src*="challenges.cloudflare.com"]'))) return true;
+  // hCaptcha checkbox đang hiện
+  if (isVisible(document.querySelector('iframe[src*="hcaptcha.com"][src*="frame=checkbox"]'))) return true;
+  // Captcha ảnh tự host đang hiện
+  if (isVisible(document.querySelector('#captcha, #captchaImg, img[src*="captcha" i]'))) return true;
+  return false;
+}
+
 function isCaptcha(): boolean {
-  const text = document.body.innerText.toLowerCase();
-  return (
-    text.includes("captcha") ||
-    text.includes("mã xác minh") ||
-    text.includes("xác thực")
-  );
+  // 1) Trang chặn Cloudflare interstitial theo tiêu đề (bản địa hoá) / từ khoá — tin cậy nhất
+  if (isCaptchaByText(document.title, document.body?.innerText || "")) {
+    return true;
+  }
+
+  // 2) Container challenge Cloudflare kiểu cũ
+  if (document.querySelector('#challenge-running, #challenge-form, #cf-challenge-running')) {
+    return true;
+  }
+
+  // 3) reCAPTCHA/Turnstile/hCaptcha ĐANG hiển thị thử thách (không tính widget nghỉ)
+  return hasVisibleChallengeWidget();
 }
 
 function extractDate(text: string): string {
@@ -72,18 +101,189 @@ async function humanPause(min: number = 400, max: number = 1200): Promise<void> 
   await sleep(randomBetween(min, max));
 }
 
+// Scroll từng bước nhỏ giống người đọc thật
 async function humanScroll(): Promise<void> {
-  const steps = randomBetween(1, 3);
-  for (let i = 0; i < steps; i += 1) {
-    window.scrollBy({
-      top: randomBetween(window.innerHeight / 4, window.innerHeight / 2),
-      left: 0,
-      behavior: "smooth",
-    });
-    await humanPause(250, 600);
+  const totalHeight = document.documentElement.scrollHeight;
+  const viewHeight = window.innerHeight;
+  if (totalHeight <= viewHeight) {
+    await humanPause(300, 800);
+    return;
   }
+
+  // Scroll tới 30-70% trang, từng bước nhỏ 20-80px — chậm như người đọc thật
+  const target = totalHeight * (randomBetween(30, 70) / 100);
+  let current = window.scrollY;
+
+  while (current < target) {
+    const step = randomBetween(20, 80);
+    current = Math.min(current + step, target);
+    window.scrollTo({ top: current, behavior: "smooth" });
+
+    // Delay giữa mỗi bước scroll: 150-400ms (chậm hơn trước nhiều)
+    await humanPause(150, 400);
+
+    // 25% dừng lại đọc 1-3 giây
+    if (Math.random() < 0.25) {
+      await humanPause(1000, 3000);
+    }
+
+    // 10% scroll ngược lên 1-2 dòng rồi tiếp tục (như mắt người lướt lại)
+    if (Math.random() < 0.1) {
+      window.scrollTo({ top: Math.max(0, current - randomBetween(30, 100)), behavior: "smooth" });
+      await humanPause(300, 700);
+      window.scrollTo({ top: current, behavior: "smooth" });
+      await humanPause(200, 400);
+    }
+  }
+
+  // 35% dừng đọc lâu hơn tại vị trí hiện tại trước khi scroll về đầu
+  if (Math.random() < 0.35) {
+    await humanPause(1500, 4000);
+  }
+
+  // 40% scroll ngược lại một đoạn như người xem lại nội dung
+  if (Math.random() < 0.4) {
+    window.scrollTo({ top: current - randomBetween(100, 350), behavior: "smooth" });
+    await humanPause(700, 1500);
+  }
+
   window.scrollTo({ top: 0, behavior: "smooth" });
-  await humanPause(150, 350);
+  await humanPause(400, 900);
+}
+
+// Tính điểm trên đường cong bezier bậc 2
+function bezierPoint(t: number, p0: number, p1: number, p2: number): number {
+  return (1 - t) * (1 - t) * p0 + 2 * (1 - t) * t * p1 + t * t * p2;
+}
+
+// Di chuyển chuột mượt từ điểm A → B theo đường cong có nhiễu nhỏ
+async function smoothMouseMove(
+  fromX: number, fromY: number,
+  toX: number, toY: number,
+  steps: number = 25
+): Promise<void> {
+  // Control point lệch để tạo đường cong tự nhiên (không thẳng)
+  const cpX = (fromX + toX) / 2 + randomBetween(-120, 120);
+  const cpY = (fromY + toY) / 2 + randomBetween(-120, 120);
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    // Ease in-out: chậm ở đầu/cuối, nhanh ở giữa
+    const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+    const x = Math.round(bezierPoint(eased, fromX, cpX, toX));
+    const y = Math.round(bezierPoint(eased, fromY, cpY, toY));
+
+    // Nhiễu nhỏ ±2px — tay người không bao giờ hoàn toàn thẳng
+    const nx = Math.max(0, Math.min(x + Math.round((Math.random() - 0.5) * 4), window.innerWidth));
+    const ny = Math.max(0, Math.min(y + Math.round((Math.random() - 0.5) * 4), window.innerHeight));
+
+    document.dispatchEvent(new MouseEvent("mousemove", {
+      bubbles: true, cancelable: true,
+      clientX: nx, clientY: ny,
+      movementX: nx - (i > 0 ? nx : fromX),
+      movementY: ny - (i > 0 ? ny : fromY),
+    }));
+
+    // Delay thay đổi: chậm đầu/cuối, nhanh giữa (giống gia tốc thật)
+    const speedFactor = Math.sin(t * Math.PI); // 0→1→0
+    await sleep(Math.round((1 - speedFactor * 0.7) * randomBetween(8, 22)));
+  }
+}
+
+// Tạo đường di chuyển chuột tự nhiên qua 2-4 điểm ngẫu nhiên
+async function naturalMousePath(): Promise<void> {
+  let x = randomBetween(80, window.innerWidth - 80);
+  let y = randomBetween(80, window.innerHeight - 80);
+
+  const waypoints = randomBetween(2, 4);
+  for (let i = 0; i < waypoints; i++) {
+    const tx = randomBetween(80, window.innerWidth - 80);
+    const ty = randomBetween(80, window.innerHeight - 80);
+    const steps = randomBetween(18, 35);
+
+    await smoothMouseMove(x, y, tx, ty, steps);
+    await humanPause(80, 350);
+
+    // Đôi khi dừng lại như đang đọc nội dung
+    if (Math.random() < 0.2) {
+      await humanPause(500, 1500);
+    }
+
+    x = tx;
+    y = ty;
+  }
+}
+
+// Giữ lại idleMouseMovement nhưng dùng naturalMousePath bên trong
+async function idleMouseMovement(count: number = 3): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await naturalMousePath();
+    await humanPause(80, 250);
+  }
+}
+
+// Cuộn bằng bàn phím — Cloudflare detect thiếu keyboard events
+async function keyboardScroll(): Promise<void> {
+  const scrollKeys = ["ArrowDown", "ArrowDown", "ArrowDown", "PageDown", "ArrowUp"];
+  const count = randomBetween(3, 7);
+  for (let i = 0; i < count; i++) {
+    const key = scrollKeys[Math.floor(Math.random() * (i < count - 1 ? 3 : 5))];
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    await humanPause(60, 180);
+    document.body.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+    await humanPause(40, 120);
+  }
+}
+
+// Select text ngẫu nhiên như người đang đọc
+async function simulateTextSelection(): Promise<void> {
+  const candidates = Array.from(
+    document.querySelectorAll("p, h2, h3, li, td")
+  ).filter((el) => (el.textContent || "").trim().length > 20);
+
+  if (candidates.length === 0) return;
+
+  const el = candidates[Math.floor(Math.random() * Math.min(candidates.length, 6))];
+  const textNode = el.firstChild;
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return;
+
+  const text = textNode.textContent || "";
+  try {
+    const start = Math.floor(Math.random() * (text.length / 2));
+    const end = Math.min(start + randomBetween(5, 25), text.length);
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, end);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    await humanPause(400, 1100);
+    window.getSelection()?.removeAllRanges();
+  } catch {
+    // ignore
+  }
+}
+
+// Blur/focus — giả lập chuyển tab rồi quay lại
+async function simulateTabActivity(): Promise<void> {
+  if (Math.random() > 0.25) return; // 25% xác suất
+  window.dispatchEvent(new Event("blur"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  await humanPause(800, 3000);
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  await humanPause(200, 500);
+}
+
+// Right-click ngẫu nhiên — người thật hay làm thế
+async function randomContextMenu(): Promise<void> {
+  if (Math.random() > 0.2) return; // 20% xác suất
+  const x = randomBetween(150, window.innerWidth - 150);
+  const y = randomBetween(150, window.innerHeight - 150);
+  document.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  await humanPause(300, 700);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await humanPause(100, 200);
 }
 
 async function humanClick(element: HTMLElement | null): Promise<boolean> {
@@ -140,7 +340,12 @@ async function humanClick(element: HTMLElement | null): Promise<boolean> {
 
 async function collectLinksFromPage(config: typeof CrawlConfig): Promise<LinkItem[]> {
   await humanPause(500, 1200);
+  await simulateTabActivity();
+  await idleMouseMovement(randomBetween(2, 4));
+  await keyboardScroll();
   await humanScroll();
+  await simulateTextSelection();
+  await randomContextMenu();
 
   const items = document.querySelectorAll(config.listPageSelectors.itemContainer);
   const results: LinkItem[] = [];
@@ -343,6 +548,15 @@ async function extractLuocDoData(config: typeof CrawlConfig): Promise<{
 
 async function extractDetailData(config: typeof CrawlConfig): Promise<DetailData | null> {
   try {
+    // Simulate human reading the page before extracting data
+    await humanPause(600, 1800);
+    await simulateTabActivity();
+    await idleMouseMovement(randomBetween(3, 6));
+    await keyboardScroll();
+    await humanScroll();
+    await simulateTextSelection();
+    await randomContextMenu();
+
     const luocDo = await extractLuocDoData(config);
     return {
       so_hieu: extractText(config.detailPageSelectors.soHieuSelector),
@@ -406,6 +620,12 @@ chrome.runtime.onMessage.addListener((msg: { type: string; config?: typeof Crawl
     try {
       waitForPageLoad()
         .then(async () => {
+          if (isCaptcha()) {
+            console.warn("[Scraper] Captcha detected on detail page");
+            sendResponse({ __captcha: true });
+            return;
+          }
+
           const detail = await extractDetailData(msg.config || CrawlConfig);
 
           if (detail) {
@@ -423,6 +643,24 @@ chrome.runtime.onMessage.addListener((msg: { type: string; config?: typeof Crawl
       sendResponse(null);
     }
 
+    return true;
+  }
+
+  if (msg.type === "GET_RANDOM_LINKS") {
+    const domain = window.location.hostname;
+    const all = Array.from(document.querySelectorAll("a[href]"))
+      .map((a) => (a as HTMLAnchorElement).href)
+      .filter((href) => {
+        try {
+          const url = new URL(href);
+          return url.hostname === domain && href !== window.location.href && !href.includes("#");
+        } catch {
+          return false;
+        }
+      });
+    // Shuffle và trả về tối đa 8 link
+    const shuffled = all.sort(() => Math.random() - 0.5).slice(0, 8);
+    sendResponse(shuffled);
     return true;
   }
 

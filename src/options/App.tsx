@@ -35,6 +35,7 @@ function App() {
 
     // Delay
     delayMultiplier: CrawlConfig.delay.delayMultiplier,
+    captchaWaitTime: CrawlConfig.delay.captchaWaitTime / 1000, // lưu theo giây
   });
 
   const [saved, setSaved] = useState(false);
@@ -82,6 +83,7 @@ function App() {
       luocDoContentSelector: CrawlConfig.detailPageSelectors.luocDoContentSelector,
       batchSize: CrawlConfig.batch.batchSize,
       delayMultiplier: CrawlConfig.delay.delayMultiplier,
+      captchaWaitTime: CrawlConfig.delay.captchaWaitTime / 1000,
     });
   }
 
@@ -251,6 +253,11 @@ function App() {
           key: "delayMultiplier",
           label: "Delay Multiplier",
           hint: "Nhân số với delay random (1 = delay random 1-3s, 2 = 2-6s)",
+        },
+        {
+          key: "captchaWaitTime",
+          label: "Bot Check Wait Time (giây)",
+          hint: "Thời gian đợi (giây) khi gặp bot check tự động, mặc định 10s",
         },
       ])}
 
