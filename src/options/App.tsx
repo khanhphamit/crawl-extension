@@ -257,7 +257,7 @@ function App() {
         {
           key: "captchaWaitTime",
           label: "Bot Check Wait Time (giây)",
-          hint: "Thời gian đợi (giây) khi gặp bot check tự động, mặc định 10s",
+          hint: "Thời gian đợi cơ sở (giây) khi gặp bot check; sẽ tăng lũy thừa nếu bị chặn liên tiếp. Mặc định 90s",
         },
       ])}
 

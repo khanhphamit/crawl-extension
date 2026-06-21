@@ -22,5 +22,8 @@ Xem [docs/ANTI_DETECTION.md](docs/ANTI_DETECTION.md). Tóm tắt điều dễ sa
 3. **2 bẫy detect captcha:** (a) title Cloudflare bản địa hoá "Chờ một chút..." (không phải "Just a moment..."); (b) reCAPTCHA NHÚNG SẴN nghỉ trên mọi trang — chỉ tính captcha khi challenge HIỂN THỊ (>50×50), KHÔNG theo sự hiện diện widget, nếu không báo nhầm mọi trang tốt.
 4. Verify thay đổi bằng `node --experimental-strip-types scripts/verify-cdp-attach.ts`.
 
+## ⚠️ MV3 service worker — sleep dài làm crawl chết âm thầm
+Chrome tắt service worker sau ~30s không có sự kiện; `setTimeout`/`sleep` KHÔNG giữ nó sống. Mọi tác vụ nền dài PHẢI dùng `keepAliveSleep` (đã có trong background), KHÔNG dùng `sleep` trực tiếp. Triệu chứng nếu quên: crawl đứng, hết log, `savedRecords` không tăng. **Log background xem ở** `chrome://extensions` → service worker → Inspect (không phải console trang web).
+
 ## Quy ước
 - Code & log/ghi chú bằng tiếng Việt (giữ nguyên phong cách hiện có).

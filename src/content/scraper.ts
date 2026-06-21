@@ -93,6 +93,18 @@ function parseTableCell(text: string, index: number = 1): string {
   return text.trim();
 }
 
+// Lấy text của 1 selector TRONG phạm vi 1 phần tử (không phải toàn document).
+// QUAN TRỌNG: dùng extractText (document.querySelector) ở đây sẽ luôn trả về cột
+// của item ĐẦU TIÊN trên trang → mọi văn bản bị gán nhầm ngày/tình trạng giống nhau.
+function extractTextWithin(root: Element, selector: string): string {
+  try {
+    return (root.querySelector(selector)?.textContent || "").trim();
+  } catch (e) {
+    console.error("[Scraper] Lỗi extractTextWithin:", selector, e);
+    return "";
+  }
+}
+
 function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -101,7 +113,10 @@ async function humanPause(min: number = 400, max: number = 1200): Promise<void> 
   await sleep(randomBetween(min, max));
 }
 
-// Scroll từng bước nhỏ giống người đọc thật
+// Scroll giống người đọc thật, nhưng GIỚI HẠN số bước + thời gian.
+// QUAN TRỌNG: dùng số bước CỐ ĐỊNH (không phải bước px nhỏ theo chiều dài trang),
+// nếu không văn bản pháp luật rất dài sẽ khiến cuộn lặp hàng trăm vòng → kẹt
+// "scroll đi scroll lại" nhiều phút trên một trang.
 async function humanScroll(): Promise<void> {
   const totalHeight = document.documentElement.scrollHeight;
   const viewHeight = window.innerHeight;
@@ -110,45 +125,41 @@ async function humanScroll(): Promise<void> {
     return;
   }
 
-  // Scroll tới 30-70% trang, từng bước nhỏ 20-80px — chậm như người đọc thật
   const target = totalHeight * (randomBetween(30, 70) / 100);
-  let current = window.scrollY;
+  const start = window.scrollY;
+  const distance = Math.max(1, target - start);
+  const steps = randomBetween(8, 16); // số bước cố định, không theo chiều dài trang
+  const baseStep = distance / steps;
+  const deadline = Date.now() + 9000; // ngân sách tối đa 9s cho 1 lần cuộn
 
-  while (current < target) {
-    const step = randomBetween(20, 80);
-    current = Math.min(current + step, target);
+  let current = start;
+  for (let i = 0; i < steps && Date.now() < deadline; i++) {
+    // Bước có nhiễu ±30% để không đều như máy
+    current = Math.min(current + baseStep * (0.7 + Math.random() * 0.6), target);
     window.scrollTo({ top: current, behavior: "smooth" });
+    await humanPause(120, 350);
 
-    // Delay giữa mỗi bước scroll: 150-400ms (chậm hơn trước nhiều)
-    await humanPause(150, 400);
-
-    // 25% dừng lại đọc 1-3 giây
-    if (Math.random() < 0.25) {
-      await humanPause(1000, 3000);
+    // 20% dừng đọc ngắn (giảm xác suất + thời lượng để không kéo dài)
+    if (Math.random() < 0.2) {
+      await humanPause(600, 1500);
     }
 
-    // 10% scroll ngược lên 1-2 dòng rồi tiếp tục (như mắt người lướt lại)
-    if (Math.random() < 0.1) {
-      window.scrollTo({ top: Math.max(0, current - randomBetween(30, 100)), behavior: "smooth" });
-      await humanPause(300, 700);
+    // 12% lướt ngược lên một chút rồi tiếp (như mắt người đọc lại)
+    if (Math.random() < 0.12) {
+      window.scrollTo({ top: Math.max(0, current - randomBetween(40, 120)), behavior: "smooth" });
+      await humanPause(250, 600);
       window.scrollTo({ top: current, behavior: "smooth" });
-      await humanPause(200, 400);
+      await humanPause(150, 350);
     }
   }
 
-  // 35% dừng đọc lâu hơn tại vị trí hiện tại trước khi scroll về đầu
-  if (Math.random() < 0.35) {
-    await humanPause(1500, 4000);
-  }
-
-  // 40% scroll ngược lại một đoạn như người xem lại nội dung
-  if (Math.random() < 0.4) {
-    window.scrollTo({ top: current - randomBetween(100, 350), behavior: "smooth" });
-    await humanPause(700, 1500);
+  // 30% dừng đọc lâu hơn một chút trước khi về đầu
+  if (Math.random() < 0.3) {
+    await humanPause(800, 2000);
   }
 
   window.scrollTo({ top: 0, behavior: "smooth" });
-  await humanPause(400, 900);
+  await humanPause(300, 700);
 }
 
 // Tính điểm trên đường cong bezier bậc 2
@@ -361,10 +372,10 @@ async function collectLinksFromPage(config: typeof CrawlConfig): Promise<LinkIte
         link: linkEl?.href || "",
         lawId,
         name: linkEl?.innerText || "",
-        ban_hanh: extractDate(extractText(".right-col p:nth-child(1)")),
-        hieu_luc: extractDate(extractText(".right-col p:nth-child(2)")),
-        tinh_trang: parseTableCell(extractText(".right-col p:nth-child(3)")),
-        cap_nhat: extractDate(extractText(".right-col p:nth-child(4)")),
+        ban_hanh: extractDate(extractTextWithin(item, ".right-col p:nth-child(1)")),
+        hieu_luc: extractDate(extractTextWithin(item, ".right-col p:nth-child(2)")),
+        tinh_trang: parseTableCell(extractTextWithin(item, ".right-col p:nth-child(3)")),
+        cap_nhat: extractDate(extractTextWithin(item, ".right-col p:nth-child(4)")),
       });
     } catch (e) {
       console.error("[Scraper] Error collecting link:", e);

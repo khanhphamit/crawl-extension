@@ -71,6 +71,7 @@ function buildConfigFromSettings(settings: SettingsMap) {
 
 function App() {
   const [statusText, setStatusText] = useState("Chưa bắt đầu");
+  const [logs, setLogs] = useState<string[]>([]);
   const [savedSession, setSavedSession] = useState<CrawlSessionData | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>({
     isRunning: false,
@@ -83,8 +84,12 @@ function App() {
 
   useEffect(() => {
     const handleMessage = (
-      msg: { type: string; statusText?: string; isRunning?: boolean; isPaused?: boolean; currentPage?: number; totalPages?: number; collectedLinks?: number; savedRecords?: number }
+      msg: { type: string; statusText?: string; logs?: string[]; isRunning?: boolean; isPaused?: boolean; currentPage?: number; totalPages?: number; collectedLinks?: number; savedRecords?: number }
     ) => {
+      // Log hoạt động (3 dòng gần nhất) — đến từ cả LOG lẫn STATUS
+      if (msg.logs) {
+        setLogs(msg.logs);
+      }
       if (msg.type === "STATUS") {
         setStatusText(msg.statusText || "");
         setSessionState({
@@ -188,6 +193,31 @@ function App() {
       }}>
         {statusText || "Chưa bắt đầu"}
       </div>
+
+      {/* Activity Log - 3 dòng gần nhất */}
+      {logs.length > 0 && (
+        <div style={{
+          padding: 8,
+          marginBottom: 12,
+          backgroundColor: "#1e1e1e",
+          color: "#9cdcfe",
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: "Consolas, 'Courier New', monospace",
+          lineHeight: 1.5,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}>
+          {logs.map((line, i) => (
+            <div
+              key={i}
+              style={{ opacity: i === logs.length - 1 ? 1 : 0.6 }}
+            >
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Progress Bar */}
       {sessionState.isRunning && (

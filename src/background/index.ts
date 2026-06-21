@@ -1,5 +1,5 @@
 import { sleep, randomDelay } from "../utils/sleep";
-import { AntiDetectionThrottle } from "../utils/anti-detection";
+import { AntiDetectionThrottle, isCaptchaByText } from "../utils/anti-detection";
 import { saveCrawlDataToApi, CrawlItem, logCrawlItem } from "../utils/api-helper";
 import { CrawlConfig } from "../config/default-config";
 import {
@@ -76,6 +76,41 @@ const sessionState: CrawlSessionState = {
 
 let currentTabId: number | null = null;
 
+// Nhớ thông báo status gần nhất để popup mở lại vẫn thấy (notifyUI chỉ tới được
+// popup khi nó đang mở; GET_STATUS dùng giá trị này thay vì rỗng).
+let lastStatusText = "";
+
+// 3 dòng log hoạt động gần nhất để hiển thị trên UI popup (đang ở trang/hàm nào).
+const recentLogs: string[] = [];
+let lastLoggedMessage = "";
+function pushLog(message: string): void {
+  if (message === lastLoggedMessage) return; // bỏ qua log trùng liên tiếp
+  lastLoggedMessage = message;
+  const t = new Date().toLocaleTimeString();
+  recentLogs.push(`[${t}] ${message}`);
+  while (recentLogs.length > 3) recentLogs.shift();
+  chrome.runtime.sendMessage({ type: "LOG", logs: [...recentLogs] }).catch(() => {});
+}
+
+// MV3: service worker bị Chrome tắt sau ~30s không có sự kiện, và setTimeout KHÔNG
+// giữ nó sống. Vì vậy sleep dài (nghỉ phiên, cooldown) làm crawl CHẾT ÂM THẦM:
+// hết log, UI đứng, state mất. keepAliveSleep cắt thời gian nghỉ thành đoạn ≤20s,
+// sau mỗi đoạn gọi 1 API extension để reset idle-timer → giữ worker sống.
+async function keepAliveSleep(ms: number): Promise<void> {
+  const CHUNK = 20000;
+  let remaining = ms;
+  while (remaining > 0) {
+    const wait = Math.min(CHUNK, remaining);
+    await sleep(wait);
+    remaining -= wait;
+    try {
+      await chrome.runtime.getPlatformInfo();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 // ==== Session break tracking ====
 let pagesSinceBreak = 0;
 let nextBreakAt = Math.floor(Math.random() * 3) + 2; // 2-4 trang
@@ -101,7 +136,7 @@ async function handleCaptchaCooldown(
   if (currentTabId !== null) {
     chrome.tabs.update(currentTabId, { active: true }).catch(() => {});
   }
-  await sleep(waitMs);
+  await keepAliveSleep(waitMs);
 
   // Sau N lần liên tiếp: bỏ phiên hiện tại, mở tab mới + warm-up lại như người mới vào
   if (throttle.shouldRotateSession()) {
@@ -113,7 +148,7 @@ async function handleCaptchaCooldown(
     }
     throttle.resetAfterRotation();
     // Nghỉ thêm 30-60s trước khi bắt đầu phiên mới
-    await sleep(Math.floor(Math.random() * 30000) + 30000);
+    await keepAliveSleep(Math.floor(Math.random() * 30000) + 30000);
     await warmupSession(config);
   }
 }
@@ -126,7 +161,7 @@ async function maybeTakeSessionBreak(): Promise<void> {
   const breakMs = Math.floor(Math.random() * 60000) + 60000;
   logProgress(`☕ Nghỉ ${Math.round(breakMs / 1000)}s sau ${pagesSinceBreak} trang (tránh bot detection)...`);
   notifyUI(`☕ Nghỉ ${Math.round(breakMs / 1000)}s...`);
-  await sleep(breakMs);
+  await keepAliveSleep(breakMs);
 
   pagesSinceBreak = 0;
   nextBreakAt = Math.floor(Math.random() * 3) + 2;
@@ -146,6 +181,7 @@ function logProgress(message: string, data?: any) {
   } else {
     console.log(`[${timestamp}] ${message}`);
   }
+  pushLog(message);
 }
 
 async function waitIfPaused(): Promise<void> {
@@ -165,9 +201,12 @@ function buildPageUrl(baseUrl: string, page: number): string {
 }
 
 function notifyUI(statusText: string) {
+  lastStatusText = statusText;
+  pushLog(statusText);
   chrome.runtime.sendMessage({
     type: "STATUS",
     statusText,
+    logs: [...recentLogs],
     ...sessionState,
   }).catch(() => {
     // Popup might be closed
@@ -292,17 +331,14 @@ async function collectLinksFromPage(
     logProgress(`✅ Nhận được ${data.data.length} links`);
     return { captcha: false, data: data.data };
   } catch (error) {
-    // sendMessage lỗi "message channel closed" thường do trang là interstitial
-    // Cloudflare/captcha (content script không inject được) → coi như bị chặn.
-    const looksLikeCaptcha =
-      error instanceof Error &&
-      (error.message.includes("message channel closed") ||
-        error.message.includes("Receiving end does not exist"));
-    if (looksLikeCaptcha) {
-      logProgress("⚠️ COLLECT không phản hồi (nghi captcha/Cloudflare)");
+    // Chỉ coi là bị chặn nếu title tab xác nhận Cloudflare; còn lại là lỗi tạm
+    // (tab điều hướng giữa chừng / content script chưa sẵn sàng) → không cooldown.
+    const blocked = await isTabBlockedByTitle(tabId);
+    if (blocked) {
+      logProgress("⚠️ COLLECT: trang chặn Cloudflare (title)");
       return { captcha: true, data: [] };
     }
-    logProgress("❌ Lỗi COLLECT:", error);
+    logProgress(`❌ Lỗi COLLECT (lỗi tạm): ${(error as Error).message}`);
     return { captcha: false, data: [] };
   }
 }
@@ -329,12 +365,26 @@ async function fetchDetailData(
 
     return { data: detail as DetailData, captcha: false };
   } catch (error) {
-    const isCaptcha =
-      error instanceof Error && error.message.includes("message channel closed");
-    if (!isCaptcha) {
-      logProgress("❌ Lỗi DETAIL:", error);
+    // Chỉ coi là captcha nếu title tab xác nhận trang chặn Cloudflare; còn lại là
+    // lỗi tạm (thường do tab điều hướng giữa chừng) → để retry thường, KHÔNG cooldown.
+    const blocked = await isTabBlockedByTitle(tabId);
+    if (!blocked) {
+      logProgress(`⚠️ DETAIL không phản hồi (lỗi tạm, sẽ thử lại): ${(error as Error).message}`);
     }
-    return { data: null, captcha: isCaptcha };
+    return { data: null, captcha: blocked };
+  }
+}
+
+// Khi sendMessage tới content script lỗi, KHÔNG đoán mò là captcha qua thông điệp
+// lỗi (lỗi "message channel closed" thường chỉ do tab điều hướng giữa chừng / race,
+// KHÔNG phải bị chặn). Thay vào đó đọc title của tab (background đọc được mà không
+// cần content script) để xác nhận đây có thật là trang chặn Cloudflare hay không.
+async function isTabBlockedByTitle(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return isCaptchaByText(tab.title || "", "");
+  } catch {
+    return false;
   }
 }
 
@@ -460,7 +510,7 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
 
         // Wait for page to load
         await waitForTabComplete(currentTabId, crawlConfig.delay.pageLoadTimeout);
-        await sleep(Math.round(randomDelay() * crawlConfig.delay.delayMultiplier * throttle.slowdownFactor));
+        await keepAliveSleep(Math.round(randomDelay() * crawlConfig.delay.delayMultiplier * throttle.slowdownFactor));
         await waitIfPaused();
 
         // Browse random links before collecting (anti-bot)
@@ -505,6 +555,8 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
             const progress = Math.round((totalItemsProcessed / sessionState.collectedLinks) * 100);
             notifyUI(`[Trang ${page}] Lấy chi tiết ${i + 1}/${pageLinks.length} (${progress}%)\n${item.link}`);
 
+            // Đánh dấu giai đoạn đang chạy để khi lỗi biết chính xác bước nào hỏng
+            let stage = "bắt đầu";
             try {
               // Retry logic for missing critical fields
               const MAX_RETRIES = 2;
@@ -514,12 +566,16 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
               while (attempt <= MAX_RETRIES && !hasRequiredFields(detail)) {
                 // Open detail page
                 if (currentTabId === null) {
+                  stage = `mở tab chi tiết (lần ${attempt + 1})`;
+                  logProgress(`🔹 [item ${i + 1}] ${stage}: ${item.link}`);
                   const tab = await chrome.tabs.create({
                     url: item.link,
                     active: false,
                   });
                   currentTabId = tab.id ?? null;
                 } else {
+                  stage = `điều hướng tab tới chi tiết (lần ${attempt + 1})`;
+                  logProgress(`🔹 [item ${i + 1}] ${stage}: ${item.link}`);
                   await chrome.tabs.update(currentTabId, {
                     url: item.link,
                   });
@@ -530,11 +586,15 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
                 }
 
                 // Wait for page to load
+                stage = "chờ trang load xong (waitForTabComplete)";
                 await waitForTabComplete(currentTabId, crawlConfig.delay.pageLoadTimeout);
-                await sleep(Math.round(randomDelay() * crawlConfig.delay.delayMultiplier * throttle.slowdownFactor));
+                stage = "delay chống bot sau khi load";
+                await keepAliveSleep(Math.round(randomDelay() * crawlConfig.delay.delayMultiplier * throttle.slowdownFactor));
                 await waitIfPaused();
 
                 // Fetch detail
+                stage = "trích xuất chi tiết (fetchDetailData)";
+                logProgress(`🔹 [item ${i + 1}] ${stage}`);
                 const fetchResult = await fetchDetailData(currentTabId, crawlConfig);
                 detail = fetchResult.data;
 
@@ -547,7 +607,7 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
                   } else if (attempt <= MAX_RETRIES) {
                     const waitMs = Math.round(crawlConfig.delay.captchaWaitTime * throttle.slowdownFactor);
                     logProgress(`🔄 Retry ${attempt}/${MAX_RETRIES} cho ${item.link}, đợi ${Math.round(waitMs / 1000)}s...`);
-                    await sleep(waitMs);
+                    await keepAliveSleep(waitMs);
                   }
                 }
               }
@@ -584,6 +644,7 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
 
                 // Send batch if reached batch size
                 if (detailBatch.length >= crawlConfig.batch.batchSize) {
+                  stage = "gửi batch API (saveAndSendBatch)";
                   const success = await saveAndSendBatch(detailBatch, crawlConfig);
                   if (!success) {
                     logProgress("⚠️ Batch gửi thất bại, dừng crawl");
@@ -597,7 +658,14 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
                 );
               }
             } catch (error) {
-              logProgress(`❌ Lỗi chi tiết item ${i + 1}:`, error);
+              // In rõ giai đoạn hỏng + message + stack (logProgress chỉ đẩy chuỗi vào log UI,
+              // nên phải nhồi nội dung lỗi vào message thì UI mới thấy được)
+              const errMsg = error instanceof Error ? error.message : String(error);
+              const errStack = error instanceof Error && error.stack ? error.stack : "";
+              logProgress(
+                `❌ Lỗi chi tiết item ${i + 1} tại giai đoạn "${stage}" (${item.link}): ${errMsg}`,
+                errStack || error
+              );
             }
           }
 
@@ -611,7 +679,7 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
           logProgress(`🛡️ Tab bị đóng (captcha?). Đợi ${waitMs / 1000}s rồi thử lại trang ${page}...`);
           notifyUI(`🛡️ Tab bị đóng! Vui lòng giải captcha, đợi ${waitMs / 1000}s...`);
           currentTabId = null;
-          await sleep(waitMs);
+          await keepAliveSleep(waitMs);
           page--; // retry lại trang hiện tại
         } else {
           logProgress(`❌ Lỗi trang ${page}:`, error);
@@ -667,6 +735,16 @@ async function startCrawl(crawlConfig: typeof CrawlConfig, resumeFromSaved: bool
 chrome.runtime.onMessage.addListener((msg: MessagePayload, sender, sendResponse) => {
   if (msg.type === "START") {
     try {
+      // Chặn chạy nhiều vòng crawl đồng thời: hai loop cùng điều hướng một tab sẽ
+      // đua nhau → "message channel closed" → báo bị chặn oan.
+      if (sessionState.isRunning) {
+        logProgress("⚠️ Bỏ qua START: đang có một phiên crawl chạy");
+        sendResponse({ success: false, error: "Đang chạy rồi" });
+        return true;
+      }
+      // Đặt cờ đồng bộ ngay đây để START thứ hai (trước khi startCrawl kịp set cờ
+      // qua await đầu tiên) bị guard ở trên chặn lại.
+      sessionState.isRunning = true;
       const config = msg.config || CrawlConfig;
       const resumeFromSaved = msg.resumeFromSaved !== false; // Default to true
       startCrawl(config, resumeFromSaved);
@@ -703,7 +781,7 @@ chrome.runtime.onMessage.addListener((msg: MessagePayload, sender, sendResponse)
   }
 
   if (msg.type === "GET_STATUS") {
-    sendResponse({ type: "STATUS", statusText: "", ...sessionState });
+    sendResponse({ type: "STATUS", statusText: lastStatusText, logs: [...recentLogs], ...sessionState });
     return true;
   }
 
